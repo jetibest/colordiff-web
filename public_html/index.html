@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Colordiff</title>
+</head>
+<body>
+
+<style type="text/css">
+*
+{padding: 0px;margin: 0px;}
+html,body
+{width: 100%;height: 100%;background-color: #222;color: #eee;font-family: sans-serif;font-family: 18px;}
+main
+{width: auto;display: flex;flex-direction: column;align-items: center;}
+#ColorInput
+{box-sizing: border-box;width: 100%;padding: 10px;font-size: 40px;text-align: center;border: 1px solid #000;border-radius: 5px;margin: 20px;box-shadow: 4px 4px 15px 0px rgba(0, 0, 0, 0.1);}
+#ColorInput.dark
+{color: #fff;border-color: #fff;}
+#ColorInput.light
+{color: #000;border-color: #000;}
+td a
+{font-size: 14px;margin-left: 60px;}
+td.dark a,
+td.dark
+{color: #fff;}
+td.light a,
+td.light
+{color: #000;}
+th
+{padding: 5px 10px;color: #666;font-weight: normal;font-size: 13px;}
+td
+{padding: 5px 10px;}
+th.rankable
+{cursor: pointer;}
+th.rankable:hover
+{background-color: rgba(255,255,255,0.1);}
+footer
+{text-align: center;font-size: 12px;padding: 20px;}
+footer a
+{color: #999;}
+</style>
+
+<main>
+	<div><input type="text" id="ColorInput" value="rgb(0,255,0)"></div>
+	<div class="color-results" id="ColorResult"></div>
+</main>
+
+<footer class="color-footer">
+	<a href="https://github.com/jetibest/colordiff-web/">GitHub.com/jetibest/colordiff-web</a>
+</footer>
+<script>
+// input: r,g,b in [0,1], out: h in [0,360) and s,v in [0,1]
+function rgb2hsv(r,g,b) 
+{
+  let v=Math.max(r,g,b), n=v-Math.min(r,g,b);
+  let h= n && ((v==r) ? (g-b)/n : ((v==g) ? 2+(b-r)/n : 4+(r-g)/n)); 
+  return [60*(h<0?h+6:h), v&&n/v, v];
+}
+// input: h in [0,360] and s,v in [0,1] - output: r,g,b in [0,255]
+function hsv2rgb(h,s,v) 
+{                              
+  let f= (n,k=(n+h/60)%6) => v - v*s*Math.max( Math.min(k,4-k,1), 0);     
+  return {
+	r: Math.floor(f(5) * 255),
+	g: Math.floor(f(3) * 255),
+	b: Math.floor(f(1) * 255)
+  };
+}    
+
+var get_file_contents = function(url, cb)
+{
+	var xmlhttp = new XMLHttpRequest();
+	xmlhttp.onreadystatechange = function()
+	{
+		if(xmlhttp.readyState === 4)
+		{
+			if(xmlhttp.status === 200)
+			{
+				cb(false, xmlhttp.responseText);
+			}
+			else
+			{
+				cb(xmlhttp.status || true);
+			}
+		}
+		
+	};
+	xmlhttp.open('GET', url);
+	xmlhttp.send(null);
+};
+var rgbcolor = function(color)
+{
+	color.hex = ('#'
+		 + color.r.toString(16).replace(/^[0-9a-f]$/gi, n => '0' + n)
+		 + color.g.toString(16).replace(/^[0-9a-f]$/gi, n => '0' + n)
+		 + color.b.toString(16).replace(/^[0-9a-f]$/gi, n => '0' + n)
+	).toLowerCase();
+	
+	var hsv = rgb2hsv(color.r/255.0, color.g/255.0, color.b/255.0);
+	color.hue = hsv[0];
+	color.saturation = hsv[1];
+	color.value = hsv[2];
+	
+	return color;
+};
+var parse_color = function(str)
+{
+	if(!str) return rgbcolor({r: 0, g: 0, b: 0, error: true});
+	if(typeof str === 'object') return str;
+	
+	str = (str+'').replace(/\s*$/gi, '').replace(/^\s*/gi, '');
+	
+	if(/^(#|)[0-9a-f]{3}$/gi.test(str))
+	{
+		str = str.replace(/^#/, '');
+		
+		return rgbcolor({
+			r: parseInt(str.substring(0, 1) + str.substring(0, 1), 16),
+			g: parseInt(str.substring(1, 2) + str.substring(1, 2), 16),
+			b: parseInt(str.substring(2, 3) + str.substring(2, 3), 16)
+		});
+	}
+	else if(/^(#|)[0-9a-f]{6}$/gi.test(str))
+	{
+		str = str.replace(/^#/, '');
+		
+		return rgbcolor({
+			r: parseInt(str.substring(0, 2), 16),
+			g: parseInt(str.substring(2, 4), 16),
+			b: parseInt(str.substring(4, 6), 16)
+		});
+	}
+	else if(/[0-9]+,\s*[0-9]+,\s*[0-9]+/gi.test(str))
+	{
+		var color = {r: 0, g: 0, b: 0};
+		str.replace(/([0-9]+),\s*([0-9]+),\s*([0-9]+)/gi, function($0, r, g, b)
+		{
+			color.r = parseInt(r);
+			color.g = parseInt(g);
+			color.b = parseInt(b);
+		});
+		return rgbcolor(color);
+	}
+	
+	return rgbcolor({r: 0, g: 0, b: 0, error: true});
+};
+window.colors = [];
+var add_color = function(name, color)
+{
+	window.colors.push({name: name, color: color});
+};
+
+get_file_contents('database.txt', function(err, data)
+{
+	if(err) return alert(err);
+	
+	var lines = data.split('\n');
+	
+	// every line may contain name \t hex-code \t ...
+	for(var i=0;i<lines.length;++i)
+	{
+		var line = lines[i].split('\t');
+		if(line.length >= 2)
+		{
+			add_color(line[0], parse_color(line[1]));
+		}
+	}
+	
+	init();
+});
+
+var diffs = [
+	{
+		name: 'sqRGB',
+		fn: function(c0, c1)
+		{
+			var dr = c0.r - c1.r;
+			var dg = c0.g - c1.g;
+			var db = c0.b - c1.b;
+			return Math.sqrt(dr*dr + dg*dg + db*db);
+		}
+	},
+	{
+		name: 'RGB',
+		fn: function(c0, c1)
+		{
+			return Math.abs(c0.r - c1.r) + Math.abs(c0.g - c1.g) + Math.abs(c0.b - c1.b);
+		}
+	},
+	{
+		name: 'Hue',
+		fn: function(c0, c1)
+		{
+			if(!c0.saturation || !c0.value)
+			{
+				if(c1.saturation && c1.value) return 255;
+			}
+			if(!c1.saturation || !c1.value)
+			{
+				if(c0.saturation && c0.value) return 255;
+			}
+			return Math.abs(c0.hue - c1.hue);
+		}
+	},
+	{
+		name: 'Saturation',
+		fn: function(c0, c1)
+		{
+			return Math.abs(c0.saturation - c1.saturation);
+		}
+	},
+	{
+		name: 'Brightness',
+		fn: function(c0, c1)
+		{
+			return Math.abs(c0.value - c1.value);
+		}
+	},
+	{
+		name: 'R',
+		fn: function(c0, c1)
+		{
+			return Math.abs(c0.r - c1.r);
+		}
+	},
+	{
+		name: 'G',
+		fn: function(c0, c1)
+		{
+			return Math.abs(c0.g - c1.g);
+		}
+	},
+	{
+		name: 'B',
+		fn: function(c0, c1)
+		{
+			return Math.abs(c0.b - c1.b);
+		}
+	}
+];
+for(var i=0;i<diffs.length;++i)
+{
+	diffs[i].index = i;
+}
+
+var calc_color = function()
+{
+	// selected diff function:
+	
+	var differ = diffs[window.diffIndex || 0];
+	var diffDir = window.diffOrder || 0;
+	
+	var colorInput = document.querySelector('#ColorInput');
+	var color = parse_color(colorInput.value);
+	colorInput.style.backgroundColor = color.hex;
+	if(color.value > 0.5)
+	{
+		colorInput.classList.add('light');
+		colorInput.classList.remove('dark');
+	}
+	else
+	{
+		colorInput.classList.add('dark');
+		colorInput.classList.remove('light');
+	}
+	
+	window.color = color;
+	
+	window.location.hash = ('#' + color.hex).replace(/^#+/gi, '#');
+	
+	var colors = window.colors.slice();
+	
+	var diffmaps = new Array(diffs.length);
+	for(var i=0;i<diffs.length;++i)
+	{
+		var diff_fn = diffs[i].fn;
+		var diffmap = {};
+		for(var j=0;j<colors.length;++j)
+		{
+			var c = colors[j];
+			diffmap[c.name] = diff_fn(c.color, color);
+		}
+		diffmaps[diffs[i].index] = diffmap;
+	}
+	
+	{
+		var diffmap = diffmaps[differ.index];
+		if(diffDir)
+		{
+			// desc
+			colors.sort(function(a, b)
+			{
+				return diffmap[b.name] - diffmap[a.name];
+			});
+		}
+		else
+		{
+			// asc
+			colors.sort(function(a, b)
+			{
+				return diffmap[a.name] - diffmap[b.name];
+			});
+		}
+	}
+	
+	var topcolors = colors.slice(0, 100);
+	var table = document.createElement('table');
+	var firstrow = document.createElement('tr');
+	var th0 = document.createElement('th');
+	th0.innerText = 'Color';
+	firstrow.appendChild(th0);
+	var thi;
+	thi = document.createElement('th');
+	thi.innerText = 'Red';
+	firstrow.appendChild(thi);
+	thi = document.createElement('th');
+	thi.innerText = 'Green';
+	firstrow.appendChild(thi);
+	thi = document.createElement('th');
+	thi.innerText = 'Blue';
+	firstrow.appendChild(thi);
+	thi = document.createElement('th');
+	thi.innerText = 'Hue';
+	firstrow.appendChild(thi);
+	thi = document.createElement('th');
+	thi.innerText = 'Saturation';
+	firstrow.appendChild(thi);
+	thi = document.createElement('th');
+	thi.innerText = 'Brightness';
+	firstrow.appendChild(thi);
+	thi = document.createElement('th');
+	thi.innerText = 'Name';
+	firstrow.appendChild(thi);
+	for(var i=0;i<diffs.length;++i)
+	{
+		var thn = document.createElement('th');
+		thn.onclick = (function(i)
+		{
+			return function()
+			{
+				if(window.diffIndex === i)
+				{
+					window.diffOrder = 1 - (window.diffOrder || 0);
+				}
+				else
+				{
+					window.diffOrder = 0;
+					window.diffIndex = i;
+				}
+				calc_color();
+			};
+		})(i);
+		if(differ === diffs[i])
+		{
+			thn.innerHTML = '<span>' + (window.diffOrder ? '&#9660;' : '&#9650;') + '</span> '+ diffs[i].name;
+		}
+		else
+		{
+			thn.innerHTML = diffs[i].name;
+		}
+		thn.className = 'rankable';
+		firstrow.appendChild(thn);
+	}
+	table.appendChild(firstrow);
+	for(var i=0;i<topcolors.length;++i)
+	{
+		var c = topcolors[i];
+		
+		var row = document.createElement('tr');
+		
+		var c0 = document.createElement('td');
+		c0.style.backgroundColor = c.color.hex;
+		c0.className = c.color.value > 0.5 ? 'light' : 'dark';
+		c0.innerHTML = '<a href="' + c.color.hex + '">' + c.color.hex + '</a>';
+		row.appendChild(c0);
+		
+		var huecolor = !c.color.value || !c.color.saturation ? {hex: '#999'} : rgbcolor(hsv2rgb(c.color.hue, 1.0, 1.0));
+		var satcolor = rgbcolor(hsv2rgb(c.color.hue, c.color.saturation, 1.0));
+		var valcolor = rgbcolor(hsv2rgb(c.color.hue, 0.0, c.color.value));
+		
+		var ci;
+		ci = document.createElement('td');
+		ci.innerText = c.color.r;
+		ci.className = c.color.r > 127 ? 'light' : 'dark';
+		ci.style.backgroundColor = 'rgb(' + c.color.r + ',0,0)';
+		row.appendChild(ci);
+		ci = document.createElement('td');
+		ci.innerText = c.color.g;
+		ci.className = c.color.g > 50 ? 'light' : 'dark';
+		ci.style.backgroundColor = 'rgb(0,' + c.color.g + ',0)';
+		row.appendChild(ci);
+		ci = document.createElement('td');
+		ci.innerText = c.color.b;
+		ci.className = c.color.b > 200 ? 'light' : 'dark';
+		ci.style.backgroundColor = 'rgb(0,0,' + c.color.b + ')';
+		row.appendChild(ci);
+		ci = document.createElement('td');
+		ci.innerHTML = (c.color.hue*1.0).toFixed(1) +'&deg;';
+		ci.className = c.color.hue > 200 ? 'dark' : 'light';
+		ci.style.backgroundColor = huecolor.hex;
+		row.appendChild(ci);
+		ci = document.createElement('td');
+		ci.innerText = Math.floor(c.color.saturation * 100) + '%';
+		ci.className = satcolor.value > 0.5 ? 'light' : 'dark';
+		ci.style.backgroundColor = satcolor.hex;
+		row.appendChild(ci);
+		ci = document.createElement('td');
+		ci.innerText = Math.floor(c.color.value * 100) + '%';
+		ci.className = valcolor.value > 0.5 ? 'light' : 'dark';
+		ci.style.backgroundColor = valcolor.hex;
+		row.appendChild(ci);
+		ci = document.createElement('td');
+		ci.innerText = c.name;
+		row.appendChild(ci);
+		
+		for(var j=0;j<diffs.length;++j)
+		{
+			var diffmap = diffmaps[j];
+			var cn = document.createElement('td');
+			var v = diffmap[c.name];
+			if(v !== parseInt(v))
+			{
+				cn.innerText = v.toFixed(3);
+			}
+			else
+			{
+				cn.innerText = v;
+			}
+			row.appendChild(cn);
+		}
+		
+		table.appendChild(row);
+	}
+	
+	var container = document.querySelector('#ColorResult');
+	container.innerHTML = '';
+	container.appendChild(table);
+};
+
+document.querySelector('#ColorInput').disabled = true;
+document.querySelector('#ColorInput').onchange = calc_color;
+document.querySelector('#ColorInput').onblur = calc_color;
+document.querySelector('#ColorInput').onkeyup = function(e)
+{
+	e = e || window.event;
+	if(e.keyCode !== 13) return;
+	calc_color();
+};
+
+document.body.style.cursor = 'wait';
+
+var update_color_from_hash = function()
+{
+	if(!window.color || window.color.hex !== window.location.hash)
+	{
+		var color = parse_color((window.location.hash || '').replace(/^#/g, ''));
+		if(!color || color.error) return;
+		document.querySelector('#ColorInput').value = color.hex;
+		calc_color();
+	}
+};
+
+var init = function()
+{
+	document.body.style.cursor = 'initial';
+	
+	document.querySelector('#ColorInput').disabled = false;
+	
+	window.onhashchange = update_color_from_hash;
+	
+	update_color_from_hash();
+};
+</script>
+
+</body>
+</html>
