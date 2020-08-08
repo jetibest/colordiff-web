@@ -41,7 +41,7 @@ footer a
 </style>
 
 <main>
-	<div><input type="text" id="ColorInput" value="rgb(0,255,0)"></div>
+	<div><input type="text" id="ColorInput" value="#e0115f"></div>
 	<div class="color-results" id="ColorResult"></div>
 </main>
 
@@ -454,10 +454,11 @@ var update_color_from_hash = function()
 	if(!window.color || window.color.hex !== window.location.hash)
 	{
 		var color = parse_color((window.location.hash || '').replace(/^#/g, ''));
-		if(!color || color.error) return;
+		if(!color || color.error) return false;
 		document.querySelector('#ColorInput').value = color.hex;
 		calc_color();
 	}
+	return true;
 };
 
 var init = function()
@@ -468,7 +469,11 @@ var init = function()
 	
 	window.onhashchange = update_color_from_hash;
 	
-	update_color_from_hash();
+	if(!update_color_from_hash())
+	{
+		// no hash, default to entered color
+		calc_color();
+	}
 };
 </script>
 
